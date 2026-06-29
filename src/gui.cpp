@@ -16,54 +16,114 @@ lv_obj_t *cache_label = NULL;
 ArcWithLabel cpu_arc_obj = {NULL, NULL};
 ArcWithLabel ram_arc_obj = {NULL, NULL};
 
+// ── Geek-style accent color mapping ──
+static lv_color_t COLOR_TEMP_NORMAL = lv_color_hex(0x00FFAA);   // Cyan-green
+static lv_color_t COLOR_TEMP_WARN  = lv_color_hex(0xFFAA00);   // Amber
+static lv_color_t COLOR_TEMP_HOT   = lv_color_hex(0xFF2255);   // Hot pink/red
+static lv_color_t COLOR_LOAD       = lv_color_hex(0xAA66FF);   // Purple
+static lv_color_t COLOR_UPTIME     = lv_color_hex(0x5599FF);   // Blue
+static lv_color_t COLOR_DISK       = lv_color_hex(0xFFDD44);   // Yellow
+static lv_color_t COLOR_CACHE      = lv_color_hex(0x00BBFF);   // Cyan
+static lv_color_t COLOR_NET_DOWN   = lv_color_hex(0x00DD88);   // Green
+static lv_color_t COLOR_NET_UP     = lv_color_hex(0xFF6644);   // Orange-red
+
+// ── Create a data card ──
+static lv_obj_t *create_data_card(lv_obj_t *parent, const char *icon_text, const char *label_text,
+                                  lv_color_t accent_color, const ThemeColors *theme)
+{
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_set_size(card, 154, 32);
+    lv_obj_set_style_radius(card, 3, 0);
+    lv_obj_set_style_bg_color(card, theme->card_bg_color, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, theme->border_color, 0);
+    lv_obj_set_style_pad_all(card, 4, 0);
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+    // Left accent bar (2px colored line on the left edge)
+    lv_obj_t *accent_bar = lv_obj_create(card);
+    lv_obj_set_size(accent_bar, 3, 24);
+    lv_obj_set_style_radius(accent_bar, 0, 0);
+    lv_obj_set_style_bg_color(accent_bar, accent_color, 0);
+    lv_obj_set_style_bg_opa(accent_bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(accent_bar, 0, 0);
+    lv_obj_align(accent_bar, LV_ALIGN_LEFT_MID, 2, 0);
+
+    // Icon
+    lv_obj_t *icon = lv_label_create(card);
+    lv_label_set_text(icon, icon_text);
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(icon, accent_color, 0);
+    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 10, 0);
+
+    // Value
+    lv_obj_t *value = lv_label_create(card);
+    lv_label_set_text(value, label_text);
+    lv_obj_set_style_text_font(value, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(value, theme->text_color, 0);
+    lv_obj_align(value, LV_ALIGN_RIGHT_MID, -4, 0);
+
+    lv_obj_set_user_data(card, value);
+    return card;
+}
+
+// ── Create the main arc widget ──
 ArcWithLabel create_arc(lv_obj_t *parent, const char *text, lv_color_t color)
 {
     ArcWithLabel result = {nullptr, nullptr};
-    if (!parent)
-        return result;
+    if (!parent) return result;
 
     lv_obj_t *arc = lv_arc_create(parent);
-    if (!arc)
-        return result;
+    if (!arc) return result;
 
-    lv_obj_set_size(arc, 110, 110);
+    lv_obj_set_size(arc, 118, 118);
     lv_arc_set_rotation(arc, 135);
     lv_arc_set_range(arc, 0, 100);
     lv_arc_set_bg_angles(arc, 0, 270);
     lv_arc_set_value(arc, 0);
 
-    lv_obj_set_style_arc_color(arc, lv_color_darken(color, LV_OPA_30), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 6, LV_PART_MAIN);
+    // Thicker arc lines for geek look
+    lv_obj_set_style_arc_color(arc, lv_color_darken(color, LV_OPA_50), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, color, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(arc, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
 
+    // Center content container
     lv_obj_t *cont = lv_obj_create(arc);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 90, 90);
+    lv_obj_set_size(cont, 96, 96);
     lv_obj_set_style_pad_all(cont, 0, 0);
     lv_obj_center(cont);
 
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(cont, 2, 0);
+    lv_obj_set_style_pad_row(cont, 1, 0);
 
+    // Title (e.g. "CPU")
     lv_obj_t *title = lv_label_create(cont);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(title, color, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x888888), 0);
     lv_label_set_text(title, text);
 
+    // Main value (e.g. "45%")
     lv_obj_t *value = lv_label_create(cont);
     lv_obj_set_style_text_font(value, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(value, color, 0);
-    lv_label_set_text(value, "--");
+    lv_label_set_text(value, "--%");
 
+    // Sub info (e.g. "6 cores" / "16 GB")
     lv_obj_t *info = lv_label_create(cont);
     lv_obj_set_style_text_font(info, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(info, lv_color_hex(0x808080), 0);
+    lv_obj_set_style_text_color(info, lv_color_hex(0x666666), 0);
     lv_label_set_text(info, "--");
 
+    // Store label pointers in user_data
     lv_obj_t **labels = (lv_obj_t **)lv_mem_alloc(3 * sizeof(lv_obj_t *));
     labels[0] = title;
     labels[1] = value;
@@ -79,13 +139,12 @@ lv_obj_t *create_button_label(lv_obj_t *parent, const char *text, const ThemeCol
 {
     lv_obj_t *btn = lv_btn_create(parent);
     lv_obj_set_size(btn, 145, 30);
-    lv_obj_set_style_radius(btn, 5, 0);
+    lv_obj_set_style_radius(btn, 3, 0);
     lv_obj_set_style_bg_color(btn, theme->card_bg_color, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_50, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(btn, 1, 0);
     lv_obj_set_style_border_color(btn, theme->border_color, 0);
-    lv_obj_set_style_shadow_width(btn, 5, 0);
-    lv_obj_set_style_shadow_color(btn, lv_color_darken(theme->bg_color, LV_OPA_30), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
     lv_obj_set_style_pad_all(btn, 5, 0);
 
     lv_obj_t *label = lv_label_create(btn);
@@ -93,138 +152,82 @@ lv_obj_t *create_button_label(lv_obj_t *parent, const char *text, const ThemeCol
     lv_obj_center(label);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(label, theme->text_color, 0);
-
     return label;
 }
 
 lv_obj_t *create_compact_label(lv_obj_t *parent, const char *text, const ThemeColors *theme)
 {
-    lv_obj_t *btn = lv_obj_create(parent);
-    lv_obj_set_size(btn, 154, LV_SIZE_CONTENT);
-    lv_obj_set_style_radius(btn, 5, 0);
-    lv_obj_set_style_bg_color(btn, theme->card_bg_color, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_50, 0);
-    lv_obj_set_style_border_width(btn, 1, 0);
-    lv_obj_set_style_border_color(btn, theme->border_color, 0);
-    lv_obj_set_style_shadow_width(btn, 5, 0);
-    lv_obj_set_style_shadow_color(btn, lv_color_darken(theme->bg_color, LV_OPA_30), 0);
-    lv_obj_set_style_pad_all(btn, 5, 0);
-
-    if (strstr(text, LV_SYMBOL_DOWNLOAD) && strstr(text, LV_SYMBOL_UPLOAD))
-    {
-        lv_obj_t *text_label = lv_label_create(btn);
-        lv_label_set_text(text_label, text);
-        lv_obj_set_style_text_font(text_label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(text_label, theme->text_color, 0);
-        lv_obj_set_width(text_label, 140);
-        lv_obj_set_style_text_align(text_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(text_label, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_user_data(btn, text_label);
-        return btn;
-    }
-
-    if (!strstr(text, LV_SYMBOL_DOWNLOAD) || !strstr(text, LV_SYMBOL_UPLOAD))
-    {
-        lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    }
-
-    bool is_temp = strstr(text, "Temp:") != NULL;
-
-    lv_obj_t *icon_label = lv_label_create(btn);
-    char icon[32];
+    // Extract icon from text (first word before space)
+    char icon_buf[32] = "";
     const char *space_pos = strchr(text, ' ');
-    if (space_pos)
-    {
+    if (space_pos) {
         size_t icon_len = space_pos - text;
-        strncpy(icon, text, icon_len);
-        icon[icon_len] = '\0';
+        if (icon_len > 31) icon_len = 31;
+        strncpy(icon_buf, text, icon_len);
+        icon_buf[icon_len] = '\0';
     }
-    else
-    {
-        strcpy(icon, "");
-    }
-    lv_label_set_text(icon_label, icon);
-    lv_obj_set_style_text_font(icon_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(icon_label, theme->text_color, 0);
 
-    lv_obj_t *text_label = lv_label_create(btn);
-    if (space_pos)
-    {
-        const char *text_start = space_pos + 1;
-        lv_label_set_text(text_label, text_start);
-    }
-    else
-    {
-        lv_label_set_text(text_label, "");
-    }
-    lv_obj_set_style_text_font(text_label, &lv_font_montserrat_14, 0);
-    if (!strstr(text, "Temp:"))
-    {
-        lv_obj_set_style_text_color(text_label, theme->text_color, 0);
-    }
-    lv_obj_set_user_data(btn, text_label);
+    const char *value_text = space_pos ? space_pos + 1 : text;
 
-    return btn;
+    // Choose accent color based on content
+    lv_color_t accent = theme->text_color;
+    if (strstr(text, "Temp:"))    accent = COLOR_TEMP_NORMAL;
+    else if (strstr(text, "Load:")) accent = COLOR_LOAD;
+    else if (strstr(text, LV_SYMBOL_POWER)) accent = COLOR_UPTIME;
+    else if (strstr(text, "Array:")) accent = COLOR_DISK;
+    else if (strstr(text, "Cache:")) accent = COLOR_CACHE;
+    else if (strstr(text, LV_SYMBOL_DOWNLOAD)) accent = COLOR_NET_DOWN;
+
+    // Network card (single line with both down/up)
+    if (strstr(text, LV_SYMBOL_DOWNLOAD) && strstr(text, LV_SYMBOL_UPLOAD)) {
+        lv_obj_t *card = create_data_card(parent, LV_SYMBOL_DOWNLOAD " " LV_SYMBOL_UPLOAD, value_text, accent, theme);
+        return card;
+    }
+
+    return create_data_card(parent, icon_buf, value_text, accent, theme);
 }
 
-void update_compact_label(lv_obj_t *btn, const char *text)
+void update_compact_label(lv_obj_t *card, const char *text)
 {
-    lv_obj_t *text_label = (lv_obj_t *)lv_obj_get_user_data(btn);
+    lv_obj_t *value_label = (lv_obj_t *)lv_obj_get_user_data(card);
+    if (!value_label) return;
 
-    if (strstr(text, LV_SYMBOL_DOWNLOAD) && strstr(text, LV_SYMBOL_UPLOAD))
-    {
-        lv_label_set_text(text_label, text);
+    if (strstr(text, "Temp:")) {
+        const char *temp_start = strstr(text, "Temp:") + 5;
+        int temperature = 0;
+        if (sscanf(temp_start, "%d", &temperature) == 1) {
+            lv_color_t tcolor;
+            if      (temperature < 40) tcolor = COLOR_TEMP_NORMAL;
+            else if (temperature < 50) tcolor = COLOR_TEMP_WARN;
+            else                       tcolor = COLOR_TEMP_HOT;
+            lv_obj_set_style_text_color(value_label, tcolor, 0);
+        }
+        lv_label_set_text(value_label, temp_start);
+        // Also update the accent bar color
+        lv_obj_t *accent_bar = lv_obj_get_child(card, 0);
+        if (accent_bar) {
+            lv_obj_set_style_bg_color(accent_bar, lv_obj_get_style_text_color(value_label, 0), 0);
+        }
         return;
     }
 
-    if (strstr(text, "Temp:"))
-    {
-        const char *temp_start = strstr(text, "Temp:") + 5;
-        int temperature = 0;
-
-        if (sscanf(temp_start, "%d", &temperature) == 1)
-        {
-            lv_color_t temp_color;
-            if (temperature < 40)
-            {
-                temp_color = lv_color_hex(0x00FF44);
-            }
-            else if (temperature < 50)
-            {
-                temp_color = lv_color_hex(0xFFAA00);
-            }
-            else
-            {
-                temp_color = lv_color_hex(0xFF4444);
-            }
-
-            lv_obj_set_style_text_color(text_label, temp_color, 0);
-        }
-        else
-        {
-            Serial.println("Failed to parse temperature!");
-        }
-
-        lv_label_set_text(text_label, temp_start);
+    // For network: preserve down/up display
+    if (strstr(text, LV_SYMBOL_DOWNLOAD) && strstr(text, LV_SYMBOL_UPLOAD)) {
+        const char *net_start = strstr(text, LV_SYMBOL_DOWNLOAD);
+        lv_label_set_text(value_label, net_start ? net_start : text);
         return;
     }
 
     const char *space_pos = strchr(text, ' ');
-    if (space_pos)
-    {
-        const char *text_start = space_pos + 1;
-        lv_label_set_text(text_label, text_start);
+    if (space_pos) {
+        lv_label_set_text(value_label, space_pos + 1);
     }
 }
 
 void set_arc_value_animated(lv_obj_t *arc, int32_t value, uint32_t duration)
 {
-    if (!arc)
-        return;
-
-    value = (value < 0) ? 0 : (value > 100) ? 100
-                                            : value;
+    if (!arc) return;
+    value = (value < 0) ? 0 : (value > 100) ? 100 : value;
 
     static lv_anim_t a;
     lv_anim_init(&a);
@@ -239,8 +242,7 @@ void set_arc_value_animated(lv_obj_t *arc, int32_t value, uint32_t duration)
 
 void update_arc_label(lv_obj_t *label, const char *text)
 {
-    if (!label || !text)
-        return;
+    if (!label || !text) return;
     lv_label_set_text(label, text);
 }
 
@@ -249,62 +251,29 @@ void applyTheme(bool darkMode)
     const ThemeColors &theme = SettingsManager::getCurrentTheme();
     lv_obj_set_style_bg_color(lv_scr_act(), theme.bg_color, 0);
 
-    if (cpu_arc_obj.arc)
-    {
+    if (cpu_arc_obj.arc) {
         lv_obj_set_style_arc_color(cpu_arc_obj.arc, theme.cpu_color, LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(cpu_arc_obj.arc, lv_color_darken(theme.cpu_color, LV_OPA_30), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(cpu_arc_obj.arc, lv_color_darken(theme.cpu_color, LV_OPA_50), LV_PART_MAIN);
         lv_obj_t **labels = (lv_obj_t **)lv_obj_get_user_data(cpu_arc_obj.arc);
-        if (labels)
-        {
-            lv_obj_set_style_text_color(labels[0], theme.text_color, 0);
-            lv_obj_set_style_text_color(labels[1], theme.text_color, 0);
-            lv_obj_set_style_text_color(labels[2], lv_color_hex(0x808080), 0);
+        if (labels) {
+            lv_obj_set_style_text_color(labels[1], theme.cpu_color, 0);
         }
     }
-
-    if (ram_arc_obj.arc)
-    {
+    if (ram_arc_obj.arc) {
         lv_obj_set_style_arc_color(ram_arc_obj.arc, theme.ram_color, LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(ram_arc_obj.arc, lv_color_darken(theme.ram_color, LV_OPA_30), LV_PART_MAIN);
-
+        lv_obj_set_style_arc_color(ram_arc_obj.arc, lv_color_darken(theme.ram_color, LV_OPA_50), LV_PART_MAIN);
         lv_obj_t **labels = (lv_obj_t **)lv_obj_get_user_data(ram_arc_obj.arc);
-        if (labels)
-        {
-
-            lv_obj_set_style_text_color(labels[0], theme.text_color, 0);
-            lv_obj_set_style_text_color(labels[1], theme.text_color, 0);
-
-            lv_obj_set_style_text_color(labels[2], lv_color_hex(0x808080), 0);
+        if (labels) {
+            lv_obj_set_style_text_color(labels[1], theme.ram_color, 0);
         }
     }
 
-    lv_obj_t *compact_labels[] = {
-        temp_label,
-        load_label,
-        uptime_label,
-        disk_label,
-        cache_label,
-        network_label};
-
-    for (lv_obj_t *label : compact_labels)
-    {
-        if (label)
-        {
-            lv_obj_set_style_border_color(label, theme.border_color, 0);
-            lv_obj_set_style_bg_color(label, theme.card_bg_color, 0);
-            lv_obj_t *icon_label = lv_obj_get_child(label, 0);
-            if (icon_label)
-            {
-                lv_obj_set_style_text_color(icon_label, theme.text_color, 0);
-            }
-            lv_obj_t *text_label = (lv_obj_t *)lv_obj_get_user_data(label);
-            if (text_label)
-            {
-                if (!strstr(lv_label_get_text(text_label), "°C"))
-                {
-                    lv_obj_set_style_text_color(text_label, theme.text_color, 0);
-                }
-            }
+    // Re-theme cards
+    lv_obj_t *cards[] = { temp_label, load_label, uptime_label, disk_label, cache_label, network_label };
+    for (lv_obj_t *card : cards) {
+        if (card) {
+            lv_obj_set_style_border_color(card, theme.border_color, 0);
+            lv_obj_set_style_bg_color(card, theme.card_bg_color, 0);
         }
     }
 }
@@ -314,73 +283,56 @@ void create_system_monitor_gui()
     const ThemeColors *theme = DARK_MODE ? &dark_theme : &light_theme;
     lv_obj_set_style_bg_color(lv_scr_act(), theme->bg_color, 0);
 
+    // ── Main horizontal container ──
     lv_obj_t *main_cont = lv_obj_create(lv_scr_act());
-    if (!main_cont)
-        return;
-
+    if (!main_cont) return;
     lv_obj_set_size(main_cont, 320, 240);
-    lv_obj_set_style_pad_all(main_cont, 2, 0);
+    lv_obj_set_style_pad_all(main_cont, 3, 0);
     lv_obj_set_style_bg_opa(main_cont, 0, 0);
     lv_obj_set_style_border_width(main_cont, 0, 0);
     lv_obj_set_flex_flow(main_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(main_cont, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_clear_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
 
+    // ── Left column ──
     lv_obj_t *left_col = lv_obj_create(main_cont);
-    if (!left_col)
-        return;
-
-    lv_obj_t *right_col = lv_obj_create(main_cont);
-    if (!right_col)
-        return;
-
-    lv_obj_set_size(left_col, 158, 240);
+    if (!left_col) return;
+    lv_obj_set_size(left_col, 158, 235);
     lv_obj_set_style_pad_all(left_col, 2, 0);
     lv_obj_set_style_bg_opa(left_col, LV_OPA_0, 0);
     lv_obj_set_style_border_width(left_col, 0, 0);
     lv_obj_set_flex_flow(left_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(left_col, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(left_col, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_set_size(right_col, 158, 240);
+    // ── Right column ──
+    lv_obj_t *right_col = lv_obj_create(main_cont);
+    if (!right_col) return;
+    lv_obj_set_size(right_col, 158, 235);
     lv_obj_set_style_pad_all(right_col, 2, 0);
     lv_obj_set_style_bg_opa(right_col, LV_OPA_0, 0);
     lv_obj_set_style_border_width(right_col, 0, 0);
     lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(right_col, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(right_col, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+    // ── Arcs ──
     cpu_arc_obj = create_arc(left_col, "CPU", theme->cpu_color);
-    if (!cpu_arc_obj.arc || !cpu_arc_obj.label)
-        return;
+    if (!cpu_arc_obj.arc || !cpu_arc_obj.label) return;
 
     ram_arc_obj = create_arc(right_col, "RAM", theme->ram_color);
-    if (!ram_arc_obj.arc || !ram_arc_obj.label)
-        return;
+    if (!ram_arc_obj.arc || !ram_arc_obj.label) return;
 
-    temp_label = create_compact_label(left_col, LV_SYMBOL_WARNING " Temp: -- °C", theme);
-    if (!temp_label)
-        return;
+    // ── Left column data cards ──
+    temp_label   = create_data_card(left_col, LV_SYMBOL_WARNING, "--\u00B0C", COLOR_TEMP_NORMAL, theme);
+    load_label   = create_data_card(left_col, LV_SYMBOL_CHARGE,  "-.--",       COLOR_LOAD,       theme);
+    uptime_label = create_data_card(left_col, LV_SYMBOL_POWER,   "---",        COLOR_UPTIME,     theme);
 
-    load_label = create_compact_label(left_col, LV_SYMBOL_CHARGE " Load: -.-", theme);
-    if (!load_label)
-        return;
+    // ── Right column data cards ──
+    disk_label    = create_data_card(right_col, LV_SYMBOL_DRIVE,  "---%", COLOR_DISK,   theme);
+    cache_label   = create_data_card(right_col, LV_SYMBOL_SAVE,  "---%", COLOR_CACHE,  theme);
+    network_label = create_data_card(right_col, LV_SYMBOL_DOWNLOAD " " LV_SYMBOL_UPLOAD,
+                                     "--- ---", COLOR_NET_DOWN, theme);
 
-    uptime_label = create_compact_label(left_col, LV_SYMBOL_POWER "  ---", theme);
-    if (!uptime_label)
-        return;
-
-    disk_label = create_compact_label(right_col, LV_SYMBOL_DRIVE " Array: ---%", theme);
-    if (!disk_label)
-        return;
-
-    cache_label = create_compact_label(right_col, LV_SYMBOL_SAVE " Cache: ---%", theme);
-    if (!cache_label)
-        return;
-
-    network_label = create_compact_label(right_col, LV_SYMBOL_DOWNLOAD " --- " LV_SYMBOL_UPLOAD " ---", theme);
-    if (!network_label)
-        return;
-
+    // ── Theme callback ──
     SettingsManager::setThemeChangeCallback(applyTheme);
-
     applyTheme(SettingsManager::getDarkMode());
 }

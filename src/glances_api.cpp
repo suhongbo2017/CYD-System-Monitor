@@ -4,7 +4,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 
-bool GlancesAPI::fetchData(const char *endpoint, StaticJsonDocument<4096> &doc)
+bool GlancesAPI::fetchData(const char *endpoint, StaticJsonDocument<4096> &doc, int port_override)
 {
     if (WiFi.status() != WL_CONNECTED)
     {
@@ -12,7 +12,8 @@ bool GlancesAPI::fetchData(const char *endpoint, StaticJsonDocument<4096> &doc)
     }
 
     HTTPClient http;
-    String url = "http://" + glances_host + ":" + String(glances_port) + endpoint;
+    int port = port_override > 0 ? port_override : glances_port;
+    String url = "http://" + glances_host + ":" + String(port) + endpoint;
     http.begin(url);
     int httpCode = http.GET();
 
@@ -43,7 +44,6 @@ void GlancesAPI::updateCPUData(StaticJsonDocument<4096> &doc)
         if (labels)
         {
             char buf[32];
-
             lv_label_set_text(labels[0], "CPU");
             snprintf(buf, sizeof(buf), "%d cores", cpuCount);
             lv_label_set_text(labels[1], buf);
@@ -72,7 +72,6 @@ void GlancesAPI::updateMemoryData(StaticJsonDocument<4096> &doc)
         if (labels)
         {
             char buf[32];
-
             lv_label_set_text(labels[0], "RAM");
             snprintf(buf, sizeof(buf), "%d%%", (int)memPercent);
             lv_label_set_text(labels[1], buf);
@@ -91,111 +90,185 @@ void updateGlancesData()
         return;
     }
     static StaticJsonDocument<4096> doc;
+
+    // ── CPU & RAM ──
     GlancesAPI::updateCPUData(doc);
     GlancesAPI::updateMemoryData(doc);
 
+    // ── Temperature ──
+    // Try Glances sensors first, fall back to WMI temp server
+    bool tempFound = false;
     if (GlancesAPI::fetchData("/api/4/sensors", doc))
     {
         for (JsonVariant sensor : doc.as<JsonArray>())
         {
-            if (strcmp(sensor["label"], "Package id 0") == 0)
+            const char *label = sensor["label"].as<const char *>();
+            if (!label) continue;
+            if (strcmp(label, "Package id 0") == 0 ||
+                strcmp(label, "Tdie") == 0 ||
+                strcmp(label, "Tctl") == 0 ||
+                (strstr(label, "CPU") != NULL))
             {
                 int temp = (int)sensor["value"].as<float>();
-                char buf[32];
-                snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING " Temp: %d°C", temp);
-                update_compact_label(temp_label, buf);
+                if (temp > 0 && temp < 120) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING " %d\u00B0C", temp);
+                    update_compact_label(temp_label, buf);
+                    tempFound = true;
+                }
                 break;
             }
         }
     }
-
-    if (GlancesAPI::fetchData("/api/4/fs", doc))
-    {
-        unsigned long long totalSize = 0;
-        unsigned long long usedSize = 0;
-
-        for (JsonVariant fs : doc.as<JsonArray>())
+    // Fallback: WMI temperature server (Libre Hardware Monitor)
+    if (!tempFound) {
+        if (GlancesAPI::fetchData("/api/temp", doc, 61209))
         {
-            const char *mnt_point = fs["mnt_point"].as<const char *>();
-            if (strncmp(mnt_point, "/rootfs/mnt/disk", 15) == 0)
+            for (JsonVariant sensor : doc.as<JsonArray>())
             {
-                totalSize += fs["size"].as<unsigned long long>();
-                usedSize += fs["used"].as<unsigned long long>();
+                float val = sensor["value"].as<float>();
+                if (val > 0 && val < 120) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING " %d\u00B0C", (int)val);
+                    update_compact_label(temp_label, buf);
+                    tempFound = true;
+                }
+                break;
             }
         }
+    }
+    if (!tempFound) {
+        update_compact_label(temp_label, LV_SYMBOL_WARNING " --\u00B0C");
+    }
 
-        if (totalSize > 0)
+    // ── Disk: pick the most used mount point (works on both Linux & Windows) ──
+    if (GlancesAPI::fetchData("/api/4/fs", doc))
+    {
+        const char *best_mount = NULL;
+        float best_percent = 0;
+        for (JsonVariant fs : doc.as<JsonArray>())
         {
-            float usagePercent = (usedSize * 100.0) / totalSize;
+            float pct = fs["percent"].as<float>();
+            const char *mnt = fs["mnt_point"].as<const char *>();
+            if (mnt && pct > best_percent) {
+                // Skip virtual/special mounts on Windows
+                if (strstr(mnt, "/rootfs") || mnt[0] == '/' || (strlen(mnt) == 2 && mnt[1] == ':')) {
+                    best_percent = pct;
+                    best_mount = mnt;
+                }
+            }
+        }
+        if (best_mount) {
             char buf[32];
-            snprintf(buf, sizeof(buf), LV_SYMBOL_DRIVE " Array: %.1f%%", usagePercent);
+            // Show short mount name
+            const char *display_name = best_mount;
+            if (strlen(best_mount) == 2 && best_mount[1] == ':')
+                display_name = best_mount; // e.g. "C:"
+            else if (strrchr(best_mount, '/'))
+                display_name = strrchr(best_mount, '/') + 1;
+            snprintf(buf, sizeof(buf), LV_SYMBOL_DRIVE " %s %.0f%%", display_name, best_percent);
             update_compact_label(disk_label, buf);
         }
     }
 
+    // ── Cache / second disk ──
     if (GlancesAPI::fetchData("/api/4/fs", doc))
     {
+        // Find the second-most-used mount
+        const char *best_mount = NULL;
+        float best_percent = 0;
+        const char *second_mount = NULL;
+        float second_percent = 0;
+
+        // First find the most used
         for (JsonVariant fs : doc.as<JsonArray>())
         {
-            const char *mnt_point = fs["mnt_point"].as<const char *>();
-            if (strcmp(mnt_point, "/rootfs/mnt/cache") == 0)
-            {
-                float usage = fs["percent"].as<float>();
-                char buf[32];
-                snprintf(buf, sizeof(buf), LV_SYMBOL_SAVE " Cache: %.1f%%", usage);
-                update_compact_label(cache_label, buf);
-                break;
+            float pct = fs["percent"].as<float>();
+            const char *mnt = fs["mnt_point"].as<const char *>();
+            if (mnt && pct > best_percent) {
+                second_percent = best_percent;
+                second_mount = best_mount;
+                best_percent = pct;
+                best_mount = mnt;
+            } else if (mnt && pct > second_percent) {
+                second_percent = pct;
+                second_mount = mnt;
             }
+        }
+
+        const char *cache_mnt = second_mount ? second_mount : best_mount;
+        float cache_pct = second_mount ? second_percent : best_percent;
+
+        if (cache_mnt) {
+            char buf[32];
+            const char *display_name = cache_mnt;
+            if (strlen(cache_mnt) == 2 && cache_mnt[1] == ':')
+                display_name = cache_mnt;
+            else if (strrchr(cache_mnt, '/'))
+                display_name = strrchr(cache_mnt, '/') + 1;
+            snprintf(buf, sizeof(buf), LV_SYMBOL_SAVE " %s %.0f%%", display_name, cache_pct);
+            update_compact_label(cache_label, buf);
         }
     }
 
+    // ── Uptime ──
     if (GlancesAPI::fetchData("/api/4/uptime", doc))
     {
         String payload = doc.as<String>();
         payload.replace("\"", "");
         char buf[32];
-        snprintf(buf, sizeof(buf), LV_SYMBOL_POWER "  %s", payload.c_str());
+        snprintf(buf, sizeof(buf), LV_SYMBOL_POWER " %s", payload.c_str());
         update_compact_label(uptime_label, buf);
     }
 
+    // ── Network: find the interface with the most traffic (works on any OS) ──
     if (GlancesAPI::fetchData("/api/4/network", doc))
     {
+        float best_recv = -1;
+        float best_sent = 0;
+
         for (JsonVariant interface : doc.as<JsonArray>())
         {
-            const char *interface_name = interface["interface_name"].as<const char *>();
-
-            if (strcmp(interface_name, "eth0") == 0)
-            {
-                float recv_rate = interface["bytes_recv_rate_per_sec"].as<float>();
-                float sent_rate = interface["bytes_sent_rate_per_sec"].as<float>();
-
-                char down_str[16], up_str[16];
-                auto formatSpeed = [](float bytes_per_sec, char *buffer)
-                {
-                    if (bytes_per_sec > 1024 * 1024)
-                        sprintf(buffer, "%.1fM", bytes_per_sec / (1024.0 * 1024.0));
-                    else if (bytes_per_sec > 1024)
-                        sprintf(buffer, "%.1fK", bytes_per_sec / 1024.0);
-                    else
-                        sprintf(buffer, "%.0fB", bytes_per_sec);
-                };
-
-                formatSpeed(recv_rate, down_str);
-                formatSpeed(sent_rate, up_str);
-
-                char buf[64];
-                snprintf(buf, sizeof(buf), LV_SYMBOL_DOWNLOAD " %s    " LV_SYMBOL_UPLOAD " %s", down_str, up_str);
-                update_compact_label(network_label, buf);
-                break;
+            const char *name = interface["interface_name"].as<const char *>();
+            if (!name) continue;
+            // Skip loopback
+            if (strstr(name, "Loopback") || strstr(name, "lo")) continue;
+            // Skip virtual adapters with no traffic
+            float recv = interface["bytes_recv_rate_per_sec"].as<float>();
+            float sent = interface["bytes_sent_rate_per_sec"].as<float>();
+            if (recv + sent > best_recv) {
+                best_recv = recv;
+                best_sent = sent;
             }
+        }
+
+        if (best_recv >= 0) {
+            char down_str[16], up_str[16];
+            auto formatSpeed = [](float bytes_per_sec, char *buffer)
+            {
+                if (bytes_per_sec > 1024 * 1024)
+                    sprintf(buffer, "%.1fM", bytes_per_sec / (1024.0 * 1024.0));
+                else if (bytes_per_sec > 1024)
+                    sprintf(buffer, "%.1fK", bytes_per_sec / 1024.0);
+                else
+                    sprintf(buffer, "%.0fB", bytes_per_sec);
+            };
+
+            formatSpeed(best_recv, down_str);
+            formatSpeed(best_sent, up_str);
+
+            char buf[64];
+            snprintf(buf, sizeof(buf), LV_SYMBOL_DOWNLOAD " %s  " LV_SYMBOL_UPLOAD " %s", down_str, up_str);
+            update_compact_label(network_label, buf);
         }
     }
 
+    // ── Load ──
     if (GlancesAPI::fetchData("/api/4/load", doc))
     {
         float load1 = doc["min1"].as<float>();
         char buf[32];
-        snprintf(buf, sizeof(buf), LV_SYMBOL_CHARGE " Load: %.1f", load1);
+        snprintf(buf, sizeof(buf), LV_SYMBOL_CHARGE " %.1f", load1);
         update_compact_label(load_label, buf);
     }
 

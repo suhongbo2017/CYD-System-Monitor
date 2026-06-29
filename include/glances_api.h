@@ -5,7 +5,7 @@
 
 struct GlancesAPI
 {
-    static bool fetchData(const char *endpoint, StaticJsonDocument<4096> &doc);
+    static bool fetchData(const char *endpoint, StaticJsonDocument<4096> &doc, int port_override = 0);
     static void updateCPUData(StaticJsonDocument<4096> &doc);
     static void updateMemoryData(StaticJsonDocument<4096> &doc);
 };
