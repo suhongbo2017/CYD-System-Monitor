@@ -4,3 +4,8 @@
 .cursorignore
 src/credentials.h
 platformio.ini
+pic/
+crop_*.png
+tft_setup.h
+include/User_Setup.h
+nul
