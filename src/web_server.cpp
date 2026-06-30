@@ -394,12 +394,6 @@ void setupWebServer()
     server.on("/resetTheme", HTTP_POST, handleResetTheme);
     server.on("/api/status", HTTP_GET, handleHaStatus);
     server.on("/api/command", HTTP_POST, handleHaCommand);
-    server.on("/css/styles.css", HTTP_GET, []()
-              {
-        File file = SPIFFS.open("/css/styles.css", "r");
-        server.streamFile(file, "text/css");
-        file.close(); });
-
     server.on("/js/main.js", HTTP_GET, []()
               {
         File file = SPIFFS.open("/js/main.js", "r");
