@@ -3,431 +3,270 @@ const cpuData = Array(maxDataPoints).fill(0)
 const memoryData = Array(maxDataPoints).fill(0)
 const labels = Array(maxDataPoints).fill('')
 
-const cpuChart = new Chart(document.getElementById('cpuChart').getContext('2d'), {
-  type: 'line',
-  data: {
-    labels: labels,
-    datasets: [
-      {
-        label: 'CPU Usage %',
-        data: cpuData,
-        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--primary-color'),
-        tension: 0.4,
-        fill: false
-      }
-    ]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: {
-      y: {
-        beginAtZero: true,
-        max: 100,
-        ticks: {
-          color: getComputedStyle(document.documentElement).getPropertyValue('--text-color')
-        },
-        grid: {
-          color: getComputedStyle(document.documentElement).getPropertyValue('--border-color')
-        }
-      },
-      x: {
-        display: false
-      }
-    },
-    plugins: {
-      legend: {
-        display: false
-      },
-      tooltip: {
-        enabled: false
-      }
-    }
-  }
-})
+// --- Charts created lazily once Chart.js loads ---
+let cpuChart = null
+let memoryChart = null
+let tempGauge = null
+let gaugesReady = false
+let chartsReady = false
+let pendingData = null
+let isEditing = false
 
-const memoryChart = new Chart(document.getElementById('memoryChart').getContext('2d'), {
-  type: 'line',
-  data: {
-    labels: labels,
-    datasets: [
-      {
-        label: 'Memory Usage %',
-        data: memoryData,
-        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--success-color'),
-        tension: 0.4,
-        fill: false
-      }
-    ]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: {
-      y: {
-        beginAtZero: true,
-        max: 100,
-        ticks: {
-          color: getComputedStyle(document.documentElement).getPropertyValue('--text-color')
-        },
-        grid: {
-          color: getComputedStyle(document.documentElement).getPropertyValue('--border-color')
-        }
-      },
-      x: {
-        display: false
-      }
-    },
-    plugins: {
-      legend: {
-        display: false
-      },
-      tooltip: {
-        enabled: false
-      }
-    }
-  }
-})
-
-fetch('/settings')
-  .then((response) => response.json())
-  .then((data) => {
-    const darkMode = data.darkMode
-    document.getElementById('darkMode').checked = darkMode
-    document.getElementById('themeState').textContent = darkMode ? 'DARK' : 'LIGHT'
-    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
-    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color')
-    cpuChart.options.scales.y.ticks.color = textColor
-    memoryChart.options.scales.y.ticks.color = textColor
-    cpuChart.update()
-    memoryChart.update()
-    document.getElementById('glancesHost').value = data.glances_host
-    document.getElementById('glancesPort').value = data.glances_port
-    updateServerDisplay()
-  })
-
-const tempGauge = new Gauge(document.getElementById('tempGauge')).setOptions({
-  angle: 0,
-  lineWidth: 0.3,
-  radiusScale: 0.9,
-  pointer: {
-    length: 0.5,
-    strokeWidth: 0.035,
-    color: getComputedStyle(document.documentElement).getPropertyValue('--danger-color')
-  },
-  limitMax: true,
-  limitMin: true,
-  colorStart: getComputedStyle(document.documentElement).getPropertyValue('--danger-color'),
-  colorStop: getComputedStyle(document.documentElement).getPropertyValue('--danger-color'),
-  strokeColor: getComputedStyle(document.documentElement).getPropertyValue('--border-color'),
-  generateGradient: true,
-  highDpiSupport: true,
-  percentColors: [
-    [0.0, '#10b981'],
-    [0.5, '#eab308'],
-    [1.0, '#ef4444']
-  ],
-  renderTicks: {
-    divisions: 5,
-    divWidth: 1.1,
-    divLength: 0.7,
-    divColor: getComputedStyle(document.documentElement).getPropertyValue('--border-color'),
-    subDivisions: 3,
-    subLength: 0.5,
-    subWidth: 0.6,
-    subColor: getComputedStyle(document.documentElement).getPropertyValue('--border-color')
-  }
-})
-
-tempGauge.maxValue = 100
-tempGauge.setMinValue(0)
-tempGauge.animationSpeed = 32
-tempGauge.set(0)
-
-function updateSignalStrength(dbm) {
-  const bars = document.querySelectorAll('.signal-bar')
-  const value = document.getElementById('signalValue')
-  value.textContent = dbm + ' dBm'
-
-  const quality = Math.max(0, Math.min(100, (dbm + 90) * 2.5))
-
-  const getStrengthClass = (barIndex, quality) => {
-    const threshold = (barIndex + 1) * 25
-    if (quality >= threshold) {
-      if (quality >= 75) return 'excellent'
-      if (quality >= 50) return 'good'
-      if (quality >= 25) return 'fair'
-      return 'poor'
-    }
-    return ''
-  }
-
-  bars.forEach((bar, index) => {
-    const threshold = (index + 1) * 25
-    const isActive = quality >= threshold
-    bar.classList.toggle('active', isActive)
-    bar.classList.remove('excellent', 'good', 'fair', 'poor')
-    if (isActive) {
-      bar.classList.add(getStrengthClass(index, quality))
-    }
-  })
-}
-
-function updateVisualizations(data) {
-  const cpuUsage = parseFloat(data.cpuUsage)
-  cpuData.push(cpuUsage)
-  cpuData.shift()
-  cpuChart.update()
-  document.querySelector(
-    '.chart-card:nth-child(1) h2'
-  ).innerHTML = `<i class="ri-cpu-line"></i> CPU Usage <span class="current-value">${cpuUsage.toFixed(1)}%</span>`
-  const totalHeap = parseFloat(data.totalHeap)
-  const freeHeap = parseFloat(data.freeHeap)
-  const usedHeap = totalHeap - freeHeap
-  const memoryUsage = Math.max(0, Math.min(100, (usedHeap / totalHeap) * 100))
-  memoryData.push(memoryUsage)
-  memoryData.shift()
-  memoryChart.update()
-  document.querySelector(
-    '.chart-card:nth-child(2) h2'
-  ).innerHTML = `<i class="ri-database-2-line"></i> Memory <span class="current-value">${memoryUsage.toFixed(
-    1
-  )}%</span>`
-  const temp = parseFloat(data.temperature)
-  tempGauge.set(temp)
-  document.querySelector(
-    '.chart-card:nth-child(3) h2'
-  ).innerHTML = `<i class="ri-temp-hot-line"></i> Temperature <span class="current-value">${temp.toFixed(1)}°C</span>`
-  document.querySelector(
-    '.chart-card:nth-child(4) h2'
-  ).innerHTML = `<i class="ri-wifi-line"></i> WiFi Signal <span class="current-value">${data.wifiStrength} dBm</span>`
-  updateSignalStrength(data.wifiStrength)
-}
-
-function updateTheme() {
-  const darkMode = document.getElementById('darkMode').checked
-  document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
-  document.getElementById('themeState').textContent = darkMode ? 'DARK' : 'LIGHT'
-
+function initCharts() {
+  if (chartsReady || typeof Chart === 'undefined') return
+  chartsReady = true
+  const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color')
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color')
-  cpuChart.options.scales.y.ticks.color = textColor
-  memoryChart.options.scales.y.ticks.color = textColor
-  cpuChart.update()
-  memoryChart.update()
+  const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color')
 
-  fetch('/settings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ darkMode })
-  })
-}
-
-function formatUptime(seconds) {
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = seconds % 60
-
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  if (hours > 0) return `${hours}h ${minutes}m ${secs}s`
-  if (minutes > 0) return `${minutes}m ${secs}s`
-  return `${secs}s`
-}
-
-function updateThemeColor(property, value) {
-  const darkMode = document.getElementById('darkMode').checked
-  const color = parseInt(value.substring(1), 16)
-
-  fetch('/settings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      darkMode: darkMode,
-      [property]: color
-    })
-  }).then(() => {
-    setTimeout(updateColorPickers, 100)
-  })
-}
-
-function updateColorPickers() {
-  fetch('/settings')
-    .then((response) => response.json())
-    .then((data) => {
-      const pickers = {
-        bg_color: 'bgColor',
-        card_bg_color: 'cardBgColor',
-        text_color: 'textColor',
-        cpu_color: 'cpuColor',
-        ram_color: 'ramColor',
-        border_color: 'borderColor'
-      }
-
-      Object.entries(pickers).forEach(([key, id]) => {
-        const picker = document.getElementById(id)
-        if (picker) {
-          picker.value = data[id]
-        }
-      })
-    })
-}
-
-function resetTheme() {
-  fetch('/resetTheme', {
-    method: 'POST'
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      if (data.status === 'success') {
-        window.location.reload()
+  try {
+    cpuChart = new Chart(document.getElementById('cpuChart').getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'CPU Usage %', data: cpuData, borderColor: primaryColor, tension: 0.4, fill: false }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, max: 100, ticks: { color: textColor }, grid: { color: borderColor } }, x: { display: false } },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } }
       }
     })
+  } catch(e) { console.warn('CPU chart init failed:', e) }
+
+  try {
+    memoryChart = new Chart(document.getElementById('memoryChart').getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'Memory %', data: memoryData, borderColor: '#10b981', tension: 0.4, fill: false }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, max: 100, ticks: { color: textColor }, grid: { color: borderColor } }, x: { display: false } },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } }
+      }
+    })
+  } catch(e) { console.warn('Memory chart init failed:', e) }
 }
 
-function restartESP() {
-  if (confirm('Are you sure you want to restart the ESP32?')) {
-    fetch('/restart', { method: 'POST' }).then(() => {
-      alert('ESP32 is restarting...')
-      setTimeout(() => {
-        window.location.reload()
-      }, 5000)
+function initGauge() {
+  if (gaugesReady || typeof Gauge === 'undefined') return
+  gaugesReady = true
+  try {
+    const target = document.getElementById('tempGauge')
+    if (!target) return
+    const ctx = target.getContext('2d')
+    tempGauge = new Gauge(ctx).setOptions({
+      angle: 0.15, lineWidth: 0.44, radiusScale: 1,
+      pointer: { length: 0.6, strokeWidth: 0.035, color: '#000000' },
+      limitMax: false, limitMin: false,
+      colorStart: '#6FADCF', colorStop: '#8FC0DA',
+      strokeColor: '#E0E0E0', generateGradient: true,
+      highDpiSupport: true,
+      staticLabels: { font: '10px sans-serif', labels: [0, 25, 50, 75, 100], color: '#000000', fractionDigits: 0 },
+      staticZones: [
+        { strokeStyle: '#F03E3E', min: 80, max: 100 },
+        { strokeStyle: '#FFDD00', min: 60, max: 80 },
+        { strokeStyle: '#30B32D', min: 0, max: 60 }
+      ]
     })
-  }
+    tempGauge.maxValue = 100
+    tempGauge.setMinValue(0)
+    tempGauge.animationSpeed = 32
+    tempGauge.set(0)
+  } catch(e) { console.warn('Gauge init failed:', e) }
+}
+
+function setupCharts() {
+  initCharts()
+  initGauge()
+}
+
+// Call setup as soon as possible, retry if CDN scripts haven't loaded yet
+setupCharts()
+if (!chartsReady || !gaugesReady) {
+  // Retry after CDN scripts finish loading
+  document.addEventListener('DOMContentLoaded', () => setTimeout(setupCharts, 100))
+  window.addEventListener('load', () => setTimeout(setupCharts, 50))
 }
 
 function updateSystemInfo(data) {
-  Object.keys(data).forEach((key) => {
-    const element = document.getElementById(key)
-    if (element) {
-      let value = data[key]
-
-      if (key === 'cpuFreqMHz') value += ' MHz'
-      if (key === 'flashChipSpeed') value += ' MHz'
-      if (key.includes('Size') || key.includes('Heap') || key.includes('Space')) value += ' KB'
-      if (key === 'temperature') value += ' °C'
-      if (key === 'wifiStrength') value += ' dBm'
-      if (key === 'heapFragmentation') value += '%'
-
-      element.textContent = value
+  const fields = [
+    'chipModel','chipRevision','sdkVersion','cpuFreqMHz','cycleCount','efuseMac',
+    'temperature','hallSensor','uptime','lastResetReason',
+    'totalHeap','freeHeap','minFreeHeap','maxAllocHeap','heapFragmentation',
+    'psramSize','freePsram','minFreePsram','maxAllocPsram',
+    'flashChipSize','flashChipSpeed','flashChipMode','sketchSize','sketchMD5','freeSketchSpace',
+    'wifiSSID','wifiBSSID','isHidden','autoReconnect','hostname','wifiMode',
+    'ipAddress','macAddress','dnsIP','gatewayIP','subnetMask'
+  ]
+  for (const key of fields) {
+    const el = document.getElementById(key)
+    if (el && data[key] !== undefined) {
+      el.textContent = (typeof data[key] === 'string' || typeof data[key] === 'number') ? data[key] : JSON.stringify(data[key])
     }
-  })
+  }
 }
 
-let isEditing = false
+function updateVisualizations(data) {
+  // CPU chart
+  if (cpuChart && data.cpuUsage !== undefined) {
+    cpuData.push(data.cpuUsage)
+    cpuData.shift()
+    cpuChart.data.datasets[0].data = cpuData
+    cpuChart.update('none')
+  }
 
-function toggleServerEdit() {
-  const displayEl = document.querySelector('.server-display')
-  const editEl = document.querySelector('.server-edit')
-  editEl.classList.toggle('active')
-  displayEl.style.display = editEl.classList.contains('active') ? 'none' : 'flex'
-  isEditing = editEl.classList.contains('active')
+  // Memory chart (approximate from system data: 100 - freeHeap/totalHeap*100)
+  if (memoryChart && data.totalHeap && data.freeHeap !== undefined) {
+    const memPct = Math.round((1 - data.freeHeap / data.totalHeap) * 100)
+    memoryData.push(memPct)
+    memoryData.shift()
+    memoryChart.data.datasets[0].data = memoryData
+    memoryChart.update('none')
+  }
+
+  // Temperature gauge (approximate from internal temp)
+  if (tempGauge && data.temperature !== undefined) {
+    const tempVal = parseFloat(data.temperature)
+    if (!isNaN(tempVal)) {
+      tempGauge.set(Math.min(tempVal, 100))
+      document.getElementById('tempValue').textContent = tempVal.toFixed(1) + '°C'
+    }
+  }
+
+  // WiFi signal bars
+  if (data.wifiStrength !== undefined) {
+    const rssi = Math.abs(data.wifiStrength)
+    const bars = document.querySelectorAll('.signal-bar')
+    let level = 0
+    if (rssi < 50) level = 4; else if (rssi < 60) level = 3; else if (rssi < 70) level = 2; else level = 1
+    bars.forEach((bar, i) => {
+      bar.classList.remove('active', 'excellent', 'good', 'fair', 'poor')
+      if (i < level) {
+        bar.classList.add('active')
+        if (level >= 4) bar.classList.add('excellent')
+        else if (level === 3) bar.classList.add('good')
+        else if (level === 2) bar.classList.add('fair')
+        else bar.classList.add('poor')
+      }
+    })
+    document.getElementById('signalValue').textContent = data.wifiStrength + ' dBm'
+  }
+}
+
+function updateColorPickers() {
+  const colorMap = { bgColor: 'bgColor', textColor: 'textColor', cpuColor: 'cpuColor', ramColor: 'ramColor', borderColor: 'borderColor', cardBgColor: 'cardBgColor' }
+  for (const [id, key] of Object.entries(colorMap)) {
+    const el = document.getElementById(id)
+    if (el && el.dataset.lastValue !== document.documentElement.style.getPropertyValue('--' + id.replace(/([A-Z])/g,'-$1').toLowerCase())) {
+      // Will be updated via API response
+    }
+  }
 }
 
 function updateServerDisplay() {
   const host = document.getElementById('glancesHost').value
   const port = document.getElementById('glancesPort').value
   const displayEl = document.getElementById('serverDisplay')
-
-  if (host && port) {
-    displayEl.textContent = `${host}:${port}`
-  } else {
-    displayEl.textContent = 'Not configured'
-  }
+  if (host && port) { displayEl.textContent = host + ':' + port }
+  else { displayEl.textContent = 'Not configured' }
 }
 
-let dataReceived = false
-const loader = document.querySelector('.loader-container')
+function toggleServerEdit() {
+  isEditing = !isEditing
+  document.querySelector('.server-edit').classList.toggle('active')
+  document.querySelector('.server-display').style.display = isEditing ? 'none' : ''
+}
 
+// --- Main data polling loop ---
+// Runs every 3 seconds. Updates page content as data arrives.
+// No overlay loader — page renders immediately with "---" placeholders.
 setInterval(() => {
   fetch('/settings')
-    .then((response) => response.json())
-    .then((data) => {
-      if (!dataReceived) {
-        dataReceived = true
-        loader.classList.add('hidden')
-      }
+    .then(r => r.json())
+    .then(data => {
+      pendingData = data
       updateSystemInfo(data)
       updateVisualizations(data)
       updateColorPickers()
 
       if (!isEditing) {
-        document.getElementById('glancesHost').value = data.glances_host
-        document.getElementById('glancesPort').value = data.glances_port
+        document.getElementById('glancesHost').value = data.glances_host || ''
+        document.getElementById('glancesPort').value = data.glances_port || ''
         updateServerDisplay()
       }
+
+      // Update theme/dark mode
+      const darkMode = document.getElementById('darkMode')
+      if (data.darkMode !== undefined) {
+        darkMode.checked = data.darkMode
+        document.getElementById('themeState').textContent = data.darkMode ? 'DARK' : 'LIGHT'
+        document.documentElement.setAttribute('data-theme', data.darkMode ? 'dark' : '')
+      }
+      const colorKeys = { bgColor: 'bg_color', textColor: 'text_color', cpuColor: 'cpu_color', ramColor: 'ram_color', borderColor: 'border_color', cardBgColor: 'card_bg_color' }
+      for (const [jsKey, cssVar] of Object.entries(colorKeys)) {
+        if (data[jsKey]) {
+          const el = document.getElementById(jsKey)
+          if (el) { el.value = data[jsKey]; el.dataset.lastValue = data[jsKey] }
+        }
+      }
+
+      // Retry chart init if not yet ready (CDN may have arrived)
+      setupCharts()
     })
-    .catch((error) => {
-      console.error('Error:', error)
-      dataReceived = false
-      loader.classList.remove('hidden')
+    .catch(err => {
+      console.warn('ESP32 data fetch failed, retrying...', err)
     })
-}, 2000)
+}, 3000)
+
+// --- Action functions ---
+function updateTheme() {
+  const dark = document.getElementById('darkMode').checked
+  fetch('/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ darkMode: dark })
+  }).catch(e => console.error(e))
+}
+
+function updateThemeColor(key, value) {
+  fetch('/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [key]: parseInt(value.replace('#',''), 16) })
+  }).catch(e => console.error(e))
+}
+
+function resetTheme() {
+  fetch('/resetTheme', { method: 'POST' })
+    .then(() => { window.location.reload() })
+    .catch(e => console.error(e))
+}
+
+function restartESP() {
+  fetch('/restart', { method: 'POST' }).then(() => {
+    setTimeout(() => { window.location.reload() }, 5000)
+  }).catch(e => console.error(e))
+}
 
 function saveGlancesSettings() {
   const host = document.getElementById('glancesHost').value
   const port = parseInt(document.getElementById('glancesPort').value)
-
-  if (!host || !port) {
-    alert('Please enter both host and port')
-    return
-  }
-
+  if (!host || !port) { alert('Please enter both host and port'); return }
   fetch('/settings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      glances_host: host,
-      glances_port: port
-    })
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ glances_host: host, glances_port: port })
   })
-    .then((response) => response.json())
-    .then((data) => {
+    .then(r => r.json())
+    .then(data => {
       if (data.status === 'success') {
-        updateServerDisplay()
-        toggleServerEdit()
-        alert('Glances settings updated successfully!')
+        updateServerDisplay(); toggleServerEdit()
       }
     })
-    .catch((error) => {
-      console.error('Error:', error)
-      alert('Failed to update Glances settings')
-    })
+    .catch(e => { console.error(e); alert('Failed to update') })
 }
 
 let displayOn = true
-
 function toggleDisplay() {
   const screenToggle = document.getElementById('screenToggle')
   displayOn = !screenToggle.checked
   document.getElementById('displayState').textContent = displayOn ? 'ON' : 'OFF'
-
   fetch('/displaySleep', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sleep: !displayOn })
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      if (!data.success) {
-        screenToggle.checked = !screenToggle.checked
-        displayOn = !displayOn
-        document.getElementById('displayState').textContent = displayOn ? 'ON' : 'OFF'
-        alert('Failed to toggle display')
-      }
-    })
-    .catch((error) => {
-      console.error('Error:', error)
-      screenToggle.checked = !screenToggle.checked
-      displayOn = !displayOn
-      document.getElementById('displayState').textContent = displayOn ? 'ON' : 'OFF'
-      alert('Failed to toggle display')
-    })
+  }).catch(e => console.error(e))
 }
