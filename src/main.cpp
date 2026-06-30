@@ -8,6 +8,7 @@
 #include "settings_manager.h"
 #include "web_server.h"
 #include "credentials.h"
+#include "wifi_manager.h"
 #include "SPIFFS.h"
 
 void setup()
@@ -18,43 +19,16 @@ void setup()
     Serial.println("\n\n======================");
     Serial.println("Starting System Monitor");
     Serial.println("======================");
-    Serial.println("Step 1: Serial Test");
-    delay(100);
-    Serial.println("Step 2: Setting hostname");
-    WiFi.hostname("systemmonitor");
-    delay(100);
-    Serial.print("Step 3: SSID to connect: ");
-    Serial.println(WIFI_SSID);
-    delay(100);
-    Serial.println("Step 4: Starting WiFi connection");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20)
-    {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-        Serial.printf(" (Status: %d)", WiFi.status());
-    }
+    // Step 1: WiFi Manager handles connection
+    // Tries saved Preferences first, then credentials.h as fallback,
+    // then starts AP mode (SSID: "CYD-Config") for web-based configuration
+    Serial.println("Step 1: WiFi Manager...");
+    WiFiManager::begin();
 
-    Serial.println("\nStep 5: WiFi connection result:");
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        Serial.println("  - Connected successfully!");
-        Serial.print("  - Hostname: ");
-        Serial.println(WiFi.getHostname());
-        Serial.print("  - IP Address: ");
-        Serial.println(WiFi.localIP());
-    }
-    else
-    {
-        Serial.println("  - Connection FAILED!");
-        Serial.print("  - Status code: ");
-        Serial.println(WiFi.status());
-    }
-
-    Serial.println("Step 6: Initializing display");
+    // Step 2: Initialize display (skip if in AP mode - no display needed yet)
+    // Actually always init display - AP mode info can be shown
+    Serial.println("Step 2: Initializing display");
     lv_init();
     init_display();
 
@@ -73,7 +47,11 @@ void setup()
         return;
     }
 
-    setupWebServer();
+    // Only start web server if connected to WiFi
+    if (WiFiManager::isConnected())
+    {
+        setupWebServer();
+    }
 
     Serial.println("======================");
     Serial.println("Setup complete!");
@@ -82,8 +60,17 @@ void setup()
 
 void loop()
 {
+    // Process WiFi Manager (DNS + web server in AP mode)
+    WiFiManager::loop();
+
     lv_timer_handler();
     updateGlancesData();
-    handleWebServer();
+
+    // Only handle main web server if connected
+    if (WiFiManager::isConnected())
+    {
+        handleWebServer();
+    }
+
     delay(1);
 }
